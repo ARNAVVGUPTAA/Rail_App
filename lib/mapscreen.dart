@@ -5,6 +5,7 @@ import 'package:flutter/services.dart' show rootBundle;
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:path_provider/path_provider.dart';
 
 // A simple data class to hold pole information
@@ -63,8 +64,130 @@ class _MapScreenState extends State<MapScreen> {
   }
 
   Future<void> _initialize() async {
+    await _requestPermissions();
     await _loadGeoJSON();
     await _initializeLocationListener();
+  }
+
+  // Request all necessary permissions
+  Future<void> _requestPermissions() async {
+    try {
+      // Request multiple permissions at once
+      Map<Permission, PermissionStatus> permissions = await [
+        Permission.location,
+        Permission.locationWhenInUse,
+        Permission.notification,
+        Permission.storage,
+      ].request();
+
+      // Check location permission specifically
+      bool locationGranted = permissions[Permission.location]?.isGranted == true ||
+                           permissions[Permission.locationWhenInUse]?.isGranted == true;
+
+      if (!locationGranted) {
+        // Check if location services are enabled
+        bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
+        if (!serviceEnabled) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Please enable location services in your device settings'),
+                duration: Duration(seconds: 3),
+              ),
+            );
+          }
+          return;
+        }
+
+        // Use Geolocator as fallback for location permission
+        LocationPermission permission = await Geolocator.checkPermission();
+        
+        if (permission == LocationPermission.denied) {
+          permission = await Geolocator.requestPermission();
+          if (permission == LocationPermission.denied) {
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('Location permission is required to show your position on the map'),
+                  duration: Duration(seconds: 3),
+                ),
+              );
+            }
+            return;
+          }
+        }
+        
+        if (permission == LocationPermission.deniedForever) {
+          if (mounted) {
+            _showPermissionDialog();
+          }
+          return;
+        }
+      }
+
+      // Check notification permission
+      if (permissions[Permission.notification]?.isDenied == true) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Notification permission denied. You may miss important updates.'),
+              duration: Duration(seconds: 2),
+            ),
+          );
+        }
+      }
+
+      // Success message
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Permissions granted! App is ready to use.'),
+            duration: Duration(seconds: 2),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error requesting permissions: $e'),
+            duration: const Duration(seconds: 3),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
+  // Show dialog for permanently denied permissions
+  void _showPermissionDialog() {
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: const Text('Location Permission Required'),
+          content: const Text(
+            'This app needs location permission to show your position on the map and find nearby poles. '
+            'Please enable location permission in your device settings.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: () {
+                Navigator.of(context).pop();
+                Geolocator.openAppSettings();
+              },
+              child: const Text('Open Settings'),
+            ),
+          ],
+        );
+      },
+    );
   }  Future<void> _loadGeoJSON() async {
     try {
       final data =
@@ -124,28 +247,76 @@ class _MapScreenState extends State<MapScreen> {
 
   Future<void> _initializeLocationListener() async {
     try {
-      Position initialPosition = await Geolocator.getCurrentPosition();
-      if (mounted) {
-        _userLocation =
-            LatLng(initialPosition.latitude, initialPosition.longitude);
-        _findNearestPole();
+      // Double-check permissions before trying to get location
+      LocationPermission permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied || 
+          permission == LocationPermission.deniedForever) {
+        // Permissions not available, skip location features
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Location permission denied. You can still view the map and poles.'),
+              duration: Duration(seconds: 3),
+            ),
+          );
+        }
+        return;
       }
+
+      Position initialPosition = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.best,
+          timeLimit: Duration(seconds: 10), // Add timeout
+        ),
+      );
+      
+      if (mounted) {
+        setState(() {
+          _userLocation = LatLng(initialPosition.latitude, initialPosition.longitude);
+          _findNearestPole();
+        });
+      }
+      
       _positionStream = Geolocator.getPositionStream(
         locationSettings: const LocationSettings(
-            accuracy: LocationAccuracy.best, distanceFilter: 10),
-      ).listen((Position position) {
-        if (mounted) {
-          setState(() {
-            _userLocation = LatLng(position.latitude, position.longitude);
-            _findNearestPole();
-            if (_tappedPoleInfo != null) {
-              _onPoleTap(_tappedPoleInfo!);
-            }
-          });
-        }
-      });
+          accuracy: LocationAccuracy.best, 
+          distanceFilter: 10,
+          timeLimit: Duration(seconds: 10), // Add timeout for each update
+        ),
+      ).listen(
+        (Position position) {
+          if (mounted) {
+            setState(() {
+              _userLocation = LatLng(position.latitude, position.longitude);
+              _findNearestPole();
+              if (_tappedPoleInfo != null) {
+                _onPoleTap(_tappedPoleInfo!);
+              }
+            });
+          }
+        },
+        onError: (error) {
+          // Handle location stream errors gracefully
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('Location update error: $error'),
+                duration: const Duration(seconds: 2),
+              ),
+            );
+          }
+        },
+      );
     } catch (e) {
-      throw Exception(e.toString());
+      // Handle location errors gracefully
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Unable to get location: ${e.toString()}'),
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      }
     }
   }
 
@@ -273,6 +444,8 @@ class _MapScreenState extends State<MapScreen> {
       options: MapOptions(
         initialCenter: initialCenter,
         initialZoom: 15.0,
+        maxZoom: 18.0, // Match TileLayer maxZoom to prevent blank areas
+        minZoom: 8.0,  // Reasonable minimum zoom for this area
         // Performance optimizations for smoother movement
         interactionOptions: const InteractionOptions(
           flags: InteractiveFlag.all & ~InteractiveFlag.rotate,
@@ -301,9 +474,15 @@ class _MapScreenState extends State<MapScreen> {
           //         ),
           //       )
           //     : NetworkTileProvider(),
-          maxZoom: 19,
+          maxZoom: 18, // Reduced from 19 to prevent blank tiles
+          minZoom: 1,  // Set minimum zoom to prevent issues
           keepBuffer: 3, // Increased buffer for smoother panning
           panBuffer: 1, // Reduce pan buffer to decrease memory usage
+          // Better tile error handling
+          errorTileCallback: (tile, error, stackTrace) {
+            // Handle tile loading errors gracefully
+            print('Tile loading error: $error');
+          },
           // Tile display settings for smoother rendering
           tileBuilder: (context, tileWidget, tile) {
             return tileWidget;

@@ -11,12 +11,16 @@ android {
     ndkVersion = "27.0.12077973"
 
     compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_11
-        targetCompatibility = JavaVersion.VERSION_11
+        // Use Java 21 for now, will auto-update when VERSION_24 becomes available
+        sourceCompatibility = JavaVersion.VERSION_21
+        targetCompatibility = JavaVersion.VERSION_21
+        // For Java 24 when available: JavaVersion.VERSION_24
     }
 
     kotlinOptions {
-        jvmTarget = JavaVersion.VERSION_11.toString()
+        // Use Java 21 target for now, will auto-update when VERSION_24 becomes available  
+        jvmTarget = JavaVersion.VERSION_21.toString()
+        // For Java 24 when available: JavaVersion.VERSION_24.toString()
     }
 
     defaultConfig {

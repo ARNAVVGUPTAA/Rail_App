@@ -33,8 +33,22 @@
     </application>
     <!-- The INTERNET permission is required for development. -->
     <uses-permission android:name="android.permission.INTERNET"/>
+    
+    <!-- Notification permissions -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+    
+    <!-- Location permissions -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" /> <!-- For Android 10+ background location -->
+    
+    <!-- Storage permissions for caching map tiles -->
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28" />
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
+    
+    <!-- Network state for checking connectivity -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    
+    <!-- Wake lock for background location (if needed) -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
 </manifest>
