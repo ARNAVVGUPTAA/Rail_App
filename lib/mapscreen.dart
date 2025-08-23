@@ -216,7 +216,8 @@ class _MapScreenState extends State<MapScreen> {
     return Scaffold(
       // UI: Change AppBar color
       appBar: AppBar(
-          title: const Text('OHE Poles Map', style: TextStyle(color: Colors.white)),
+          title: const Text('OHE Poles Map',
+              style: TextStyle(color: Colors.white)),
           backgroundColor: const Color.fromARGB(255, 21, 49, 77),
           iconTheme: const IconThemeData(color: Colors.white)),
       body: FutureBuilder<void>(
@@ -370,14 +371,20 @@ class _MapScreenState extends State<MapScreen> {
                     ),
                   ],
                 ),
-              )
+              ),
+              // Custom positioned floating action button - 10% up from bottom
+              Positioned(
+                bottom:
+                    MediaQuery.of(context).size.height * 0.1, // 10% from bottom
+                right: 16,
+                child: FloatingActionButton(
+                  onPressed: _centerOnUser,
+                  child: const Icon(Icons.my_location),
+                ),
+              ),
             ],
           );
         },
-      ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _centerOnUser,
-        child: const Icon(Icons.my_location),
       ),
     );
   }
@@ -424,7 +431,7 @@ class _MapScreenState extends State<MapScreen> {
           textAlign: TextAlign.center, style: titleStyle);
     }
     return Text(
-      'Nearest Pole: ${_nearestPole!.name} (${(_distanceToNearestPole ?? 0).toStringAsFixed(1)} m away)',
+      'Nearest Pole: ${_nearestPole!.name} \n (${(_distanceToNearestPole ?? 0).toStringAsFixed(1)} m away)',
       textAlign: TextAlign.center,
       style: titleStyle,
     );
