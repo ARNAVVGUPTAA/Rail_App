@@ -1,0 +1,26 @@
+{
+"type": "FeatureCollection",
+"name": "Rail tracks",
+"features": [
+{ "type": "Feature", "properties": { "Name": "Untitled measurement" }, "geometry": { "type": "LineString", "coordinates": [ [ 82.3990984, 26.9791592, 0.0 ], [ 82.3994006, 26.9789909, 0.0 ] ] } },
+{ "type": "Feature", "properties": { "Name": "Untitled measurement" }, "geometry": { "type": "LineString", "coordinates": [ [ 82.3993985, 26.978992, 0.0 ], [ 82.3998077, 26.9787632, 0.0 ], [ 82.4002022, 26.9785457, 0.0 ], [ 82.4006471, 26.9783075, 0.0 ] ] } },
+{ "type": "Feature", "properties": { "Name": "Untitled measurement" }, "geometry": { "type": "LineString", "coordinates": [ [ 82.4006423, 26.9783083, 0.0 ], [ 82.4011178, 26.9780557, 0.0 ], [ 82.4016404, 26.977786, 0.0 ], [ 82.4021311, 26.9775485, 0.0 ] ] } },
+{ "type": "Feature", "properties": { "Name": "Untitled measurement" }, "geometry": { "type": "LineString", "coordinates": [ [ 82.4021285, 26.9775481, 0.0 ], [ 82.4026779, 26.9772877, 0.0 ], [ 82.4032065, 26.9770442, 0.0 ], [ 82.4037823, 26.9767973, 0.0 ] ] } },
+{ "type": "Feature", "properties": { "Name": "Untitled measurement" }, "geometry": { "type": "LineString", "coordinates": [ [ 82.4037794, 26.9767975, 0.0 ], [ 82.4043355, 26.9765665, 0.0 ], [ 82.4049637, 26.9762871, 0.0 ], [ 82.4062302, 26.9757643, 0.0 ] ] } },
+{ "type": "Feature", "properties": { "Name": "Untitled measurement" }, "geometry": { "type": "LineString", "coordinates": [ [ 82.4062298, 26.9757645, 0.0 ], [ 82.406857, 26.9755071, 0.0 ], [ 82.4075079, 26.975241, 0.0 ], [ 82.4081284, 26.9749706, 0.0 ], [ 82.4087442, 26.974713, 0.0 ], [ 82.4094008, 26.9744339, 0.0 ], [ 82.4100045, 26.9741715, 0.0 ], [ 82.4106042, 26.9739285, 0.0 ] ] } },
+{ "type": "Feature", "properties": { "Name": "Untitled measurement" }, "geometry": { "type": "LineString", "coordinates": [ [ 82.4106041, 26.9739283, 0.0 ], [ 82.4111438, 26.9737094, 0.0 ], [ 82.4117097, 26.9734618, 0.0 ], [ 82.4122474, 26.9732341, 0.0 ] ] } },
+{ "type": "Feature", "properties": { "Name": "Untitled measurement" }, "geometry": { "type": "LineString", "coordinates": [ [ 82.4122461, 26.9732334, 0.0 ], [ 82.4127083, 26.9730536, 0.0 ], [ 82.4131528, 26.9728759, 0.0 ] ] } },
+{ "type": "Feature", "properties": { "Name": "Untitled measurement" }, "geometry": { "type": "LineString", "coordinates": [ [ 82.4131514, 26.9728761, 0.0 ], [ 82.4136837, 26.9726412, 0.0 ], [ 82.4142932, 26.9723864, 0.0 ], [ 82.4149597, 26.9721016, 0.0 ], [ 82.4156206, 26.9718241, 0.0 ] ] } },
+{ "type": "Feature", "properties": { "Name": "Untitled measurement" }, "geometry": { "type": "LineString", "coordinates": [ [ 82.4156208, 26.9718243, 0.0 ], [ 82.4162346, 26.9715565, 0.0 ], [ 82.4168026, 26.9713223, 0.0 ], [ 82.4173725, 26.9710757, 0.0 ] ] } },
+{ "type": "Feature", "properties": { "Name": "Untitled measurement" }, "geometry": { "type": "LineString", "coordinates": [ [ 82.417372, 26.9710756, 0.0 ], [ 82.4179445, 26.97084, 0.0 ], [ 82.4184069, 26.9706471, 0.0 ], [ 82.4188933, 26.9704381, 0.0 ] ] } },
+{ "type": "Feature", "properties": { "Name": "Untitled measurement" }, "geometry": { "type": "LineString", "coordinates": [ [ 82.4188921, 26.9704385, 0.0 ], [ 82.4194778, 26.9701936, 0.0 ], [ 82.420109, 26.9699268, 0.0 ], [ 82.42071, 26.9696637, 0.0 ] ] } },
+{ "type": "Feature", "properties": { "Name": "Untitled measurement" }, "geometry": { "type": "LineString", "coordinates": [ [ 82.4207085, 26.9696639, 0.0 ], [ 82.4212505, 26.9694404, 0.0 ], [ 82.4218257, 26.9692096, 0.0 ], [ 82.4223811, 26.9689801, 0.0 ] ] } },
+{ "type": "Feature", "properties": { "Name": "Untitled measurement" }, "geometry": { "type": "LineString", "coordinates": [ [ 82.4223791, 26.9689805, 0.0 ], [ 82.4229598, 26.9687413, 0.0 ], [ 82.4234703, 26.9685192, 0.0 ], [ 82.4241, 26.9682376, 0.0 ] ] } },
+{ "type": "Feature", "properties": { "Name": "Untitled measurement" }, "geometry": { "type": "LineString", "coordinates": [ [ 82.4240953, 26.9682388, 0.0 ], [ 82.4246936, 26.9679894, 0.0 ], [ 82.4252653, 26.9677591, 0.0 ], [ 82.4258469, 26.9675211, 0.0 ] ] } },
+{ "type": "Feature", "properties": { "Name": "Untitled measurement" }, "geometry": { "type": "LineString", "coordinates": [ [ 82.4258463, 26.9675215, 0.0 ], [ 82.4264135, 26.967287, 0.0 ], [ 82.4269934, 26.9670379, 0.0 ], [ 82.4274903, 26.9668363, 0.0 ] ] } },
+{ "type": "Feature", "properties": { "Name": "Untitled measurement" }, "geometry": { "type": "LineString", "coordinates": [ [ 82.4274863, 26.9668369, 0.0 ], [ 82.4279713, 26.9666291, 0.0 ], [ 82.4286158, 26.9663609, 0.0 ] ] } },
+{ "type": "Feature", "properties": { "Name": "Untitled measurement" }, "geometry": { "type": "LineString", "coordinates": [ [ 82.4286137, 26.9663612, 0.0 ], [ 82.4292662, 26.9660899, 0.0 ], [ 82.4299371, 26.9658115, 0.0 ], [ 82.430572, 26.9655447, 0.0 ] ] } },
+{ "type": "Feature", "properties": { "Name": "Untitled measurement" }, "geometry": { "type": "LineString", "coordinates": [ [ 82.4305693, 26.9655451, 0.0 ], [ 82.4310203, 26.9653502, 0.0 ], [ 82.4314506, 26.9651629, 0.0 ], [ 82.4320275, 26.964927, 0.0 ] ] } },
+{ "type": "Feature", "properties": { "Name": "Untitled measurement" }, "geometry": { "type": "LineString", "coordinates": [ [ 82.4320258, 26.9649276, 0.0 ], [ 82.4326201, 26.9646784, 0.0 ], [ 82.4331616, 26.9644595, 0.0 ], [ 82.4337313, 26.9642198, 0.0 ] ] } }
+]
+}
