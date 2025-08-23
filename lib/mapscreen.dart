@@ -56,7 +56,9 @@ class _MapScreenState extends State<MapScreen> {
   void initState() {
     super.initState();
     _initFuture = _initialize();
-  }  @override
+  }
+
+  @override
   void dispose() {
     _positionStream?.cancel();
     _searchController.dispose();
@@ -81,8 +83,9 @@ class _MapScreenState extends State<MapScreen> {
       ].request();
 
       // Check location permission specifically
-      bool locationGranted = permissions[Permission.location]?.isGranted == true ||
-                           permissions[Permission.locationWhenInUse]?.isGranted == true;
+      bool locationGranted =
+          permissions[Permission.location]?.isGranted == true ||
+              permissions[Permission.locationWhenInUse]?.isGranted == true;
 
       if (!locationGranted) {
         // Check if location services are enabled
@@ -91,7 +94,8 @@ class _MapScreenState extends State<MapScreen> {
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
               const SnackBar(
-                content: Text('Please enable location services in your device settings'),
+                content: Text(
+                    'Please enable location services in your device settings'),
                 duration: Duration(seconds: 3),
               ),
             );
@@ -101,14 +105,15 @@ class _MapScreenState extends State<MapScreen> {
 
         // Use Geolocator as fallback for location permission
         LocationPermission permission = await Geolocator.checkPermission();
-        
+
         if (permission == LocationPermission.denied) {
           permission = await Geolocator.requestPermission();
           if (permission == LocationPermission.denied) {
             if (mounted) {
               ScaffoldMessenger.of(context).showSnackBar(
                 const SnackBar(
-                  content: Text('Location permission is required to show your position on the map'),
+                  content: Text(
+                      'Location permission is required to show your position on the map'),
                   duration: Duration(seconds: 3),
                 ),
               );
@@ -116,7 +121,7 @@ class _MapScreenState extends State<MapScreen> {
             return;
           }
         }
-        
+
         if (permission == LocationPermission.deniedForever) {
           if (mounted) {
             _showPermissionDialog();
@@ -130,7 +135,8 @@ class _MapScreenState extends State<MapScreen> {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
-              content: Text('Notification permission denied. You may miss important updates.'),
+              content: Text(
+                  'Notification permission denied. You may miss important updates.'),
               duration: Duration(seconds: 2),
             ),
           );
@@ -147,7 +153,6 @@ class _MapScreenState extends State<MapScreen> {
           ),
         );
       }
-
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -188,7 +193,9 @@ class _MapScreenState extends State<MapScreen> {
         );
       },
     );
-  }  Future<void> _loadGeoJSON() async {
+  }
+
+  Future<void> _loadGeoJSON() async {
     try {
       final data =
           await rootBundle.loadString('assets/lucknow_network.geojson');
@@ -249,13 +256,14 @@ class _MapScreenState extends State<MapScreen> {
     try {
       // Double-check permissions before trying to get location
       LocationPermission permission = await Geolocator.checkPermission();
-      if (permission == LocationPermission.denied || 
+      if (permission == LocationPermission.denied ||
           permission == LocationPermission.deniedForever) {
         // Permissions not available, skip location features
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
-              content: Text('Location permission denied. You can still view the map and poles.'),
+              content: Text(
+                  'Location permission denied. You can still view the map and poles.'),
               duration: Duration(seconds: 3),
             ),
           );
@@ -269,17 +277,18 @@ class _MapScreenState extends State<MapScreen> {
           timeLimit: Duration(seconds: 10), // Add timeout
         ),
       );
-      
+
       if (mounted) {
         setState(() {
-          _userLocation = LatLng(initialPosition.latitude, initialPosition.longitude);
+          _userLocation =
+              LatLng(initialPosition.latitude, initialPosition.longitude);
           _findNearestPole();
         });
       }
-      
+
       _positionStream = Geolocator.getPositionStream(
         locationSettings: const LocationSettings(
-          accuracy: LocationAccuracy.best, 
+          accuracy: LocationAccuracy.best,
           distanceFilter: 10,
           timeLimit: Duration(seconds: 10), // Add timeout for each update
         ),
@@ -445,7 +454,7 @@ class _MapScreenState extends State<MapScreen> {
         initialCenter: initialCenter,
         initialZoom: 15.0,
         maxZoom: 18.0, // Match TileLayer maxZoom to prevent blank areas
-        minZoom: 8.0,  // Reasonable minimum zoom for this area
+        minZoom: 8.0, // Reasonable minimum zoom for this area
         // Performance optimizations for smoother movement
         interactionOptions: const InteractionOptions(
           flags: InteractiveFlag.all & ~InteractiveFlag.rotate,
@@ -463,7 +472,8 @@ class _MapScreenState extends State<MapScreen> {
           subdomains: const ['a', 'b', 'c'],
           retinaMode: true,
           // Use cached tile provider if cache path is available, otherwise fallback to network
-          tileProvider: NetworkTileProvider(), // Temporarily disabled cache until we fix the API
+          tileProvider:
+              NetworkTileProvider(), // Temporarily disabled cache until we fix the API
           // TODO: Re-enable cache when HiveCacheStore is available
           // tileProvider: cachePath != null
           //     ? CachedTileProvider(
@@ -475,7 +485,7 @@ class _MapScreenState extends State<MapScreen> {
           //       )
           //     : NetworkTileProvider(),
           maxZoom: 18, // Reduced from 19 to prevent blank tiles
-          minZoom: 1,  // Set minimum zoom to prevent issues
+          minZoom: 1, // Set minimum zoom to prevent issues
           keepBuffer: 3, // Increased buffer for smoother panning
           panBuffer: 1, // Reduce pan buffer to decrease memory usage
           // Better tile error handling
@@ -538,7 +548,8 @@ class _MapScreenState extends State<MapScreen> {
               FutureBuilder<String>(
                 future: _getCachePath(),
                 builder: (context, cacheSnapshot) {
-                  if (cacheSnapshot.connectionState == ConnectionState.waiting) {
+                  if (cacheSnapshot.connectionState ==
+                      ConnectionState.waiting) {
                     return const Center(child: CircularProgressIndicator());
                   }
                   if (cacheSnapshot.hasError || !cacheSnapshot.hasData) {

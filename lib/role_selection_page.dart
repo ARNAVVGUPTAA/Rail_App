@@ -1,9 +1,34 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart'; // Required for SystemNavigator.pop
 import 'actions_page.dart';
+import 'auth_service.dart';
+import 'package:fluttertoast/fluttertoast.dart';
 
 class RoleSelectionPage extends StatelessWidget {
   const RoleSelectionPage({super.key});
+
+  // Function to handle logout
+  Future<void> _handleLogout(BuildContext context) async {
+    try {
+      await AuthService.signOut();
+      Fluttertoast.showToast(
+        msg: 'Logged out successfully',
+        toastLength: Toast.LENGTH_SHORT,
+        gravity: ToastGravity.BOTTOM,
+        backgroundColor: Colors.grey[800],
+        textColor: Colors.white,
+      );
+      // The AuthWrapper will automatically navigate to login page
+    } catch (e) {
+      Fluttertoast.showToast(
+        msg: 'Error logging out: ${e.toString()}',
+        toastLength: Toast.LENGTH_SHORT,
+        gravity: ToastGravity.BOTTOM,
+        backgroundColor: Colors.grey[800],
+        textColor: Colors.white,
+      );
+    }
+  }
 
   void _navigateToActionsPage(BuildContext context, String role) {
     Navigator.of(context).pushReplacement(
@@ -60,6 +85,13 @@ class RoleSelectionPage extends StatelessWidget {
           backgroundColor: const Color(0xFF2C3E50), // Dark blue-gray color
           centerTitle: true,
           automaticallyImplyLeading: false, // Removes the default back button
+          actions: [
+            IconButton(
+              icon: const Icon(Icons.logout, color: Colors.white),
+              onPressed: () => _handleLogout(context),
+              tooltip: 'Logout',
+            ),
+          ],
         ),
         body: Center(
           child: Padding(
