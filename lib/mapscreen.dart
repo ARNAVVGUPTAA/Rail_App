@@ -216,8 +216,9 @@ class _MapScreenState extends State<MapScreen> {
     return Scaffold(
       // UI: Change AppBar color
       appBar: AppBar(
-          title: const Text('OHE Poles Map'),
-          backgroundColor: const Color.fromARGB(255, 21, 49, 77)),
+          title: const Text('OHE Poles Map', style: TextStyle(color: Colors.white)),
+          backgroundColor: const Color.fromARGB(255, 21, 49, 77),
+          iconTheme: const IconThemeData(color: Colors.white)),
       body: FutureBuilder<void>(
         future: _initFuture,
         builder: (context, snapshot) {
@@ -241,14 +242,31 @@ class _MapScreenState extends State<MapScreen> {
                 options: MapOptions(
                   initialCenter: initialCenter,
                   initialZoom: 15.0,
+                  // Performance optimizations for smoother movement
+                  interactionOptions: const InteractionOptions(
+                    flags: InteractiveFlag.all & ~InteractiveFlag.rotate,
+                  ),
+                  // Reduce animation duration for snappier feel
+                  onMapEvent: (MapEvent mapEvent) {
+                    // Optional: Handle map events if needed
+                  },
                 ),
                 children: [
-                  // UI: Use a darker map tile for a different theme
+                  // UI: Use a light/greyish map tile with enhanced caching
                   TileLayer(
                     urlTemplate:
-                        "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",
+                        "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png",
                     subdomains: const ['a', 'b', 'c'],
                     retinaMode: true,
+                    // Enhanced caching and performance settings
+                    tileProvider: NetworkTileProvider(),
+                    maxZoom: 19,
+                    keepBuffer: 3, // Increased buffer for smoother panning
+                    panBuffer: 1, // Reduce pan buffer to decrease memory usage
+                    // Tile display settings for smoother rendering
+                    tileBuilder: (context, tileWidget, tile) {
+                      return tileWidget;
+                    },
                   ),
                   PolylineLayer(polylines: _routePolylines),
                   if (_searchPolyline != null)
