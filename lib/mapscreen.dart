@@ -5,6 +5,7 @@ import 'package:flutter/services.dart' show rootBundle;
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:path_provider/path_provider.dart';
 
 // A simple data class to hold pole information
 class Pole {
@@ -44,13 +45,17 @@ class _MapScreenState extends State<MapScreen> {
 
   StreamSubscription<Position>? _positionStream;
 
+  // Performance optimization: Cache markers to avoid rebuilding every frame
+  List<Marker>? _cachedPoleMarkers;
+  Marker? _cachedUserMarker;
+  LatLng? _lastUserLocation;
+  Pole? _lastTappedPole;
+
   @override
   void initState() {
     super.initState();
     _initFuture = _initialize();
-  }
-
-  @override
+  }  @override
   void dispose() {
     _positionStream?.cancel();
     _searchController.dispose();
@@ -60,9 +65,7 @@ class _MapScreenState extends State<MapScreen> {
   Future<void> _initialize() async {
     await _loadGeoJSON();
     await _initializeLocationListener();
-  }
-
-  Future<void> _loadGeoJSON() async {
+  }  Future<void> _loadGeoJSON() async {
     try {
       final data =
           await rootBundle.loadString('assets/lucknow_network.geojson');
@@ -197,13 +200,127 @@ class _MapScreenState extends State<MapScreen> {
 
   void _onPoleTap(Pole poleData) {
     if (_userLocation == null) return;
-    setState(() => _tappedPoleInfo = poleData);
+    setState(() {
+      _tappedPoleInfo = poleData;
+      // Invalidate pole marker cache when selection changes
+      _cachedPoleMarkers = null;
+    });
   }
 
   void _centerOnUser() {
     if (_userLocation != null) {
       _mapController.move(_userLocation!, 15.0);
     }
+  }
+
+  // Get cache directory path for map tiles
+  Future<String> _getCachePath() async {
+    final cacheDirectory = await getTemporaryDirectory();
+    return cacheDirectory.path;
+  }
+
+  // Performance optimization: Build cached pole markers only when needed
+  List<Marker> _buildPoleMarkers() {
+    if (_cachedPoleMarkers != null && _lastTappedPole == _tappedPoleInfo) {
+      return _cachedPoleMarkers!;
+    }
+
+    _cachedPoleMarkers = _poles.map((pole) {
+      return Marker(
+        width: 30,
+        height: 30,
+        point: pole.position,
+        child: GestureDetector(
+          onTap: () => _onPoleTap(pole),
+          child: Icon(
+            Icons.location_on,
+            color: _tappedPoleInfo?.position == pole.position
+                ? Colors.cyanAccent
+                : Colors.redAccent,
+          ),
+        ),
+      );
+    }).toList();
+
+    _lastTappedPole = _tappedPoleInfo;
+    return _cachedPoleMarkers!;
+  }
+
+  // Performance optimization: Build cached user marker only when location changes
+  Marker? _buildUserMarker() {
+    if (_userLocation == null) return null;
+
+    if (_cachedUserMarker != null && _lastUserLocation == _userLocation) {
+      return _cachedUserMarker;
+    }
+
+    _cachedUserMarker = Marker(
+      width: 40,
+      height: 40,
+      point: _userLocation!,
+      child: const Icon(Icons.person_pin_circle,
+          color: Colors.lightBlueAccent, size: 40),
+    );
+
+    _lastUserLocation = _userLocation;
+    return _cachedUserMarker;
+  }
+
+  // Build FlutterMap with optional cache support
+  Widget _buildFlutterMap(LatLng initialCenter, String? cachePath) {
+    return FlutterMap(
+      mapController: _mapController,
+      options: MapOptions(
+        initialCenter: initialCenter,
+        initialZoom: 15.0,
+        // Performance optimizations for smoother movement
+        interactionOptions: const InteractionOptions(
+          flags: InteractiveFlag.all & ~InteractiveFlag.rotate,
+        ),
+        // Reduce animation duration for snappier feel
+        onMapEvent: (MapEvent mapEvent) {
+          // Optional: Handle map events if needed
+        },
+      ),
+      children: [
+        // UI: Use a light/greyish map tile with optional persistent caching
+        TileLayer(
+          urlTemplate:
+              "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png",
+          subdomains: const ['a', 'b', 'c'],
+          retinaMode: true,
+          // Use cached tile provider if cache path is available, otherwise fallback to network
+          tileProvider: NetworkTileProvider(), // Temporarily disabled cache until we fix the API
+          // TODO: Re-enable cache when HiveCacheStore is available
+          // tileProvider: cachePath != null
+          //     ? CachedTileProvider(
+          //         maxStale: const Duration(days: 30),
+          //         store: HiveCacheStore(
+          //           cachePath,
+          //           hiveBoxName: 'HiveCacheStore',
+          //         ),
+          //       )
+          //     : NetworkTileProvider(),
+          maxZoom: 19,
+          keepBuffer: 3, // Increased buffer for smoother panning
+          panBuffer: 1, // Reduce pan buffer to decrease memory usage
+          // Tile display settings for smoother rendering
+          tileBuilder: (context, tileWidget, tile) {
+            return tileWidget;
+          },
+        ),
+        PolylineLayer(polylines: _routePolylines),
+        if (_searchPolyline != null)
+          PolylineLayer(polylines: [_searchPolyline!]),
+        // Performance optimized MarkerLayer with cached markers
+        MarkerLayer(
+          markers: [
+            ..._buildPoleMarkers(),
+            if (_buildUserMarker() != null) _buildUserMarker()!,
+          ],
+        ),
+      ],
+    );
   }
 
   @override
@@ -238,70 +355,20 @@ class _MapScreenState extends State<MapScreen> {
 
           return Stack(
             children: [
-              FlutterMap(
-                mapController: _mapController,
-                options: MapOptions(
-                  initialCenter: initialCenter,
-                  initialZoom: 15.0,
-                  // Performance optimizations for smoother movement
-                  interactionOptions: const InteractionOptions(
-                    flags: InteractiveFlag.all & ~InteractiveFlag.rotate,
-                  ),
-                  // Reduce animation duration for snappier feel
-                  onMapEvent: (MapEvent mapEvent) {
-                    // Optional: Handle map events if needed
-                  },
-                ),
-                children: [
-                  // UI: Use a light/greyish map tile with enhanced caching
-                  TileLayer(
-                    urlTemplate:
-                        "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png",
-                    subdomains: const ['a', 'b', 'c'],
-                    retinaMode: true,
-                    // Enhanced caching and performance settings
-                    tileProvider: NetworkTileProvider(),
-                    maxZoom: 19,
-                    keepBuffer: 3, // Increased buffer for smoother panning
-                    panBuffer: 1, // Reduce pan buffer to decrease memory usage
-                    // Tile display settings for smoother rendering
-                    tileBuilder: (context, tileWidget, tile) {
-                      return tileWidget;
-                    },
-                  ),
-                  PolylineLayer(polylines: _routePolylines),
-                  if (_searchPolyline != null)
-                    PolylineLayer(polylines: [_searchPolyline!]),
-                  MarkerLayer(
-                    markers: [
-                      ..._poles.map((pole) {
-                        return Marker(
-                          width: 30,
-                          height: 30,
-                          point: pole.position,
-                          child: GestureDetector(
-                            onTap: () => _onPoleTap(pole),
-                            child: Icon(
-                              Icons.location_on,
-                              // UI: Change marker color
-                              color: _tappedPoleInfo?.position == pole.position
-                                  ? Colors.cyanAccent
-                                  : Colors.redAccent,
-                            ),
-                          ),
-                        );
-                      }),
-                      if (_userLocation != null)
-                        Marker(
-                          width: 40,
-                          height: 40,
-                          point: _userLocation!,
-                          child: const Icon(Icons.person_pin_circle,
-                              color: Colors.lightBlueAccent, size: 40),
-                        ),
-                    ],
-                  ),
-                ],
+              // Wrap FlutterMap with FutureBuilder for cache path
+              FutureBuilder<String>(
+                future: _getCachePath(),
+                builder: (context, cacheSnapshot) {
+                  if (cacheSnapshot.connectionState == ConnectionState.waiting) {
+                    return const Center(child: CircularProgressIndicator());
+                  }
+                  if (cacheSnapshot.hasError || !cacheSnapshot.hasData) {
+                    // Fallback to non-cached map if cache path fails
+                    return _buildFlutterMap(initialCenter, null);
+                  }
+                  // Build map with cache support
+                  return _buildFlutterMap(initialCenter, cacheSnapshot.data!);
+                },
               ),
               // Search Bar
               Positioned(
