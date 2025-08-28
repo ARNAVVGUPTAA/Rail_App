@@ -1,26 +1,13 @@
 import 'dart:async';
-import 'dart:convert';
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart' show rootBundle;
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:path_provider/path_provider.dart';
-
-// A simple data class to hold pole information
-class Pole {
-  final LatLng position;
-  final String name;
-  final String dataId;
-  final double height;
-
-  Pole(
-      {required this.position,
-      required this.name,
-      required this.dataId,
-      required this.height});
-}
+import 'map_data_service.dart';
+import 'package:fluttertoast/fluttertoast.dart';
 
 class MapScreen extends StatefulWidget {
   const MapScreen({super.key});
@@ -31,18 +18,43 @@ class MapScreen extends StatefulWidget {
 
 class _MapScreenState extends State<MapScreen> {
   final MapController _mapController = MapController();
+  bool _isLoading = false;
   final TextEditingController _searchController = TextEditingController();
 
   late final Future<void> _initFuture;
 
-  List<Pole> _poles = [];
+  List<PoleData> _poles = [];
+  List<PoleData> _visiblePoles = []; // Only poles in viewport
   List<Polyline> _routePolylines = [];
   LatLng? _userLocation;
 
-  Pole? _tappedPoleInfo;
-  Pole? _nearestPole;
+  // Performance optimization variables
+  double _currentZoom = 10.0;
+  LatLngBounds? _currentBounds;
+  Timer? _debounceTimer;
+  
+  // Clustering settings
+  static const double _clusterDistance = 50.0; // pixels
+  static const int _maxPolesPerCluster = 10;
+  static const double _minZoomForIndividualPoles = 12.0;
+
+  // Use ValueNotifiers to avoid rebuilding entire map
+  final ValueNotifier<PoleData?> _selectedPoleNotifier =
+      ValueNotifier<PoleData?>(null);
+  final ValueNotifier<LatLng?> _userLocationNotifier =
+      ValueNotifier<LatLng?>(null);
+  final ValueNotifier<int> _markerUpdateTrigger =
+      ValueNotifier<int>(0); // Triggers marker rebuilds without setState
+  
+  PoleData? get _tappedPoleInfo => _selectedPoleNotifier.value;
+  PoleData? _nearestPole;
   double? _distanceToNearestPole;
-  Polyline? _searchPolyline;
+  
+  // Connection line from user to selected pole
+  final ValueNotifier<Polyline?> _connectionLineNotifier =
+      ValueNotifier<Polyline?>(null);
+  final ValueNotifier<Polyline?> _searchPolylineNotifier =
+      ValueNotifier<Polyline?>(null);
 
   StreamSubscription<Position>? _positionStream;
 
@@ -50,7 +62,9 @@ class _MapScreenState extends State<MapScreen> {
   List<Marker>? _cachedPoleMarkers;
   Marker? _cachedUserMarker;
   LatLng? _lastUserLocation;
-  Pole? _lastTappedPole;
+  PoleData? _lastTappedPole;
+  double? _lastZoom;
+  LatLngBounds? _lastBounds;
 
   @override
   void initState() {
@@ -61,13 +75,19 @@ class _MapScreenState extends State<MapScreen> {
   @override
   void dispose() {
     _positionStream?.cancel();
+    _debounceTimer?.cancel();
     _searchController.dispose();
+    _selectedPoleNotifier.dispose();
+    _userLocationNotifier.dispose();
+    _markerUpdateTrigger.dispose();
+    _connectionLineNotifier.dispose();
+    _searchPolylineNotifier.dispose();
     super.dispose();
   }
 
   Future<void> _initialize() async {
     await _requestPermissions();
-    await _loadGeoJSON();
+    await _loadSupabaseData();
     await _initializeLocationListener();
   }
 
@@ -195,60 +215,87 @@ class _MapScreenState extends State<MapScreen> {
     );
   }
 
-  Future<void> _loadGeoJSON() async {
+  Future<void> _loadSupabaseData() async {
     try {
-      final data =
-          await rootBundle.loadString('assets/lucknow_network.geojson');
-      final geoJson = json.decode(data);
-      final features = geoJson['features'] as List;
+      setState(() {
+        _isLoading = true;
+      });
 
-      List<Pole> tempPoles = [];
-      List<Polyline> tempPolylines = [];
+      // Show loading notification
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Row(
+            children: [
+              SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(
+                  color: Colors.white,
+                  strokeWidth: 2,
+                ),
+              ),
+              SizedBox(width: 12),
+              Text('🔄 Loading data from Supabase...'),
+            ],
+          ),
+          backgroundColor: Colors.green,
+          duration: Duration(seconds: 2),
+        ),
+      );
 
-      for (var feature in features) {
-        final geometry = feature['geometry'];
-        final type = geometry['type'];
-        final coords = geometry['coordinates'];
-        final properties = feature['properties'];
+      print('🚀 Fetching data from Supabase...');
 
-        if (type == 'Point') {
-          String description = properties['description'] ?? '';
+      // Fetch routes and poles from Supabase
+      final routes = await MapDataService.fetchRoutes();
+      final poles = await MapDataService.fetchPoles();
 
-          String dataId = 'N/A';
-          double height = 5.5;
+      // Convert routes to polylines
+      List<Polyline> tempPolylines = routes.map((route) {
+        return Polyline(
+          points: route.coordinates,
+          strokeWidth: 3.0,
+          color: Colors.orangeAccent,
+        );
+      }).toList();
 
-          final dataIdMatch = RegExp(r'DataID: (\d+)').firstMatch(description);
-          if (dataIdMatch != null) {
-            dataId = dataIdMatch.group(1)!;
-          }
-
-          final altMatch = RegExp(r'Alt: ([\d.]+)').firstMatch(description);
-          if (altMatch != null) {
-            height = double.tryParse(altMatch.group(1)!) ?? 5.5;
-          }
-
-          tempPoles.add(Pole(
-            name: properties['Name'] ?? 'Unknown Pole',
-            dataId: dataId,
-            position: LatLng(coords[1].toDouble(), coords[0].toDouble()),
-            height: height,
-          ));
-        } else if (type == 'LineString') {
-          final points = (coords as List)
-              .map((point) => LatLng(point[1].toDouble(), point[0].toDouble()))
-              .toList();
-          tempPolylines.add(Polyline(
-            points: points,
-            strokeWidth: 3,
-            color: Colors.orangeAccent,
-          ));
-        }
-      }
-
-      _poles = tempPoles;
+      _poles = poles;
       _routePolylines = tempPolylines;
+      _cachedPoleMarkers = null; // Reset cache
+
+      setState(() {
+        _isLoading = false;
+      });
+
+      print('✅ Loaded ${routes.length} routes and ${poles.length} poles');
+
+      // Show success notification
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Row(
+            children: [
+              const Icon(Icons.check_circle, color: Colors.white),
+              const SizedBox(width: 12),
+              Text('✅ Loaded ${routes.length} routes, ${poles.length} poles'),
+            ],
+          ),
+          backgroundColor: Colors.green,
+          duration: const Duration(seconds: 2),
+        ),
+      );
     } catch (e) {
-      throw Exception("Failed to load or parse GeoJSON data: $e");
+      setState(() {
+        _isLoading = false;
+      });
+
+      print('❌ Error loading data: $e');
+
+      Fluttertoast.showToast(
+        msg: "Error loading data: ${e.toString()}",
+        toastLength: Toast.LENGTH_LONG,
+        gravity: ToastGravity.BOTTOM,
+        backgroundColor: Colors.redAccent,
+        textColor: Colors.white,
+      );
     }
   }
 
@@ -279,11 +326,12 @@ class _MapScreenState extends State<MapScreen> {
       );
 
       if (mounted) {
-        setState(() {
-          _userLocation =
-              LatLng(initialPosition.latitude, initialPosition.longitude);
-          _findNearestPole();
-        });
+        // Use ValueNotifier to update location without rebuilding entire map
+        _userLocation = LatLng(initialPosition.latitude, initialPosition.longitude);
+        _userLocationNotifier.value = _userLocation;
+        _findNearestPole();
+        // Update connection line when location changes
+        _updateConnectionLine();
       }
 
       _positionStream = Geolocator.getPositionStream(
@@ -295,13 +343,15 @@ class _MapScreenState extends State<MapScreen> {
       ).listen(
         (Position position) {
           if (mounted) {
-            setState(() {
-              _userLocation = LatLng(position.latitude, position.longitude);
-              _findNearestPole();
-              if (_tappedPoleInfo != null) {
-                _onPoleTap(_tappedPoleInfo!);
-              }
-            });
+            // Use ValueNotifier to update location without rebuilding entire map
+            _userLocation = LatLng(position.latitude, position.longitude);
+            _userLocationNotifier.value = _userLocation;
+            _findNearestPole();
+            if (_tappedPoleInfo != null) {
+              _onPoleTap(_tappedPoleInfo!);
+            }
+            // Update connection line when location changes
+            _updateConnectionLine();
           }
         },
         onError: (error) {
@@ -330,13 +380,14 @@ class _MapScreenState extends State<MapScreen> {
   }
 
   void _findNearestPole() {
-    if (_userLocation == null || _poles.isEmpty) return;
-    Pole? nearest;
+    final userLocation = _userLocationNotifier.value;
+    if (userLocation == null || _poles.isEmpty) return;
+    PoleData? nearest;
     double minDistance = double.infinity;
     for (var pole in _poles) {
       final distance = Geolocator.distanceBetween(
-          _userLocation!.latitude,
-          _userLocation!.longitude,
+          userLocation.latitude,
+          userLocation.longitude,
           pole.position.latitude,
           pole.position.longitude);
       if (distance < minDistance) {
@@ -356,21 +407,29 @@ class _MapScreenState extends State<MapScreen> {
     if (name.isEmpty) return;
     final pole = _poles.firstWhere(
       (p) => p.name.toLowerCase().contains(name.toLowerCase()),
-      orElse: () =>
-          Pole(position: const LatLng(0, 0), name: '', dataId: '', height: 0),
+      orElse: () => PoleData(
+        id: '',
+        routeId: '',
+        name: '',
+        position: const LatLng(0, 0),
+        height: 0,
+        status: '',
+      ),
     );
 
     if (pole.name.isNotEmpty) {
-      setState(() {
-        _tappedPoleInfo = pole;
-        if (_userLocation != null) {
-          _searchPolyline = Polyline(
-            points: [_userLocation!, pole.position],
-            strokeWidth: 4,
-            color: Colors.blueAccent,
-          );
-        }
-      });
+      // Update selected pole without setState
+      _selectedPoleNotifier.value = pole;
+
+      // Update search polyline without setState
+      final userLocation = _userLocationNotifier.value;
+      if (userLocation != null) {
+        _searchPolylineNotifier.value = Polyline(
+          points: [userLocation, pole.position],
+          strokeWidth: 4,
+          color: Colors.blueAccent,
+        );
+      }
       _mapController.move(pole.position, 17.0);
     } else {
       ScaffoldMessenger.of(context)
@@ -378,19 +437,41 @@ class _MapScreenState extends State<MapScreen> {
     }
   }
 
-  void _onPoleTap(Pole poleData) {
-    if (_userLocation == null) return;
-    setState(() {
-      _tappedPoleInfo = poleData;
-      // Invalidate pole marker cache when selection changes
-      _cachedPoleMarkers = null;
-    });
+  void _onPoleTap(PoleData poleData) {
+    if (_userLocationNotifier.value == null) return;
+    
+    // Only proceed if this is a different pole
+    if (_selectedPoleNotifier.value?.id == poleData.id) return;
+    
+    // Update the selected pole notifier - no setState needed!
+    _selectedPoleNotifier.value = poleData;
+    // Create connection line from user to selected pole
+    _updateConnectionLine();
+    // Trigger marker update without setState to show color change
+    _triggerMarkerUpdate();
   }
 
   void _centerOnUser() {
-    if (_userLocation != null) {
-      _mapController.move(_userLocation!, 15.0);
+    final userLocation = _userLocationNotifier.value;
+    if (userLocation != null) {
+      _mapController.move(userLocation, 15.0);
     }
+  }
+
+  // Update connection line from user to selected pole
+  void _updateConnectionLine() {
+    final userLocation = _userLocationNotifier.value;
+    if (userLocation == null || _selectedPoleNotifier.value == null) {
+      _connectionLineNotifier.value = null;
+      return;
+    }
+
+    _connectionLineNotifier.value = Polyline(
+      points: [userLocation, _selectedPoleNotifier.value!.position],
+      strokeWidth: 3.0,
+      color: Colors.blue,
+      pattern: const StrokePattern.dotted(),
+    );
   }
 
   // Get cache directory path for map tiles
@@ -401,48 +482,242 @@ class _MapScreenState extends State<MapScreen> {
 
   // Performance optimization: Build cached pole markers only when needed
   List<Marker> _buildPoleMarkers() {
-    if (_cachedPoleMarkers != null && _lastTappedPole == _tappedPoleInfo) {
+    // Get current map state
+    final zoom = _mapController.camera.zoom;
+    final bounds = _mapController.camera.visibleBounds;
+    
+    // Check if we need to rebuild markers
+    bool needsRebuild = _cachedPoleMarkers == null ||
+        _lastTappedPole != _selectedPoleNotifier.value ||
+        _lastZoom != zoom ||
+        _lastBounds != bounds;
+    
+    if (!needsRebuild) {
       return _cachedPoleMarkers!;
     }
 
-    _cachedPoleMarkers = _poles.map((pole) {
-      return Marker(
-        width: 30,
-        height: 30,
-        point: pole.position,
-        child: GestureDetector(
-          onTap: () => _onPoleTap(pole),
-          child: Icon(
-            Icons.location_on,
-            color: _tappedPoleInfo?.position == pole.position
-                ? Colors.cyanAccent
-                : Colors.redAccent,
+    // Filter poles by viewport for performance
+    _visiblePoles = _filterPolesByViewport(bounds);
+    
+    // Use clustering at lower zoom levels
+    if (zoom < _minZoomForIndividualPoles) {
+      _cachedPoleMarkers = _buildClusteredMarkers(_visiblePoles, zoom);
+    } else {
+      // Show individual poles at higher zoom levels, but limit quantity
+      final limitedPoles = _visiblePoles.length > 500 
+          ? _visiblePoles.take(500).toList() 
+          : _visiblePoles;
+          
+      _cachedPoleMarkers = limitedPoles.map((pole) {
+        return Marker(
+          width: 30,
+          height: 30,
+          point: pole.position,
+          child: GestureDetector(
+            onTap: () => _onPoleTap(pole),
+            child: Icon(
+              Icons.location_on,
+              color: _selectedPoleNotifier.value?.position == pole.position
+                  ? Colors.cyanAccent
+                  : Colors.redAccent,
+            ),
+          ),
+        );
+      }).toList();
+    }
+
+    // Update cache keys
+    _lastTappedPole = _selectedPoleNotifier.value;
+    _lastZoom = zoom;
+    _lastBounds = bounds;
+    
+    return _cachedPoleMarkers!;
+  }
+
+  // Filter poles to only those visible in current viewport
+  List<PoleData> _filterPolesByViewport(LatLngBounds bounds) {
+    return _poles.where((pole) {
+      return bounds.contains(pole.position);
+    }).toList();
+  }
+
+  // Build clustered markers for better performance at low zoom levels
+  List<Marker> _buildClusteredMarkers(List<PoleData> poles, double zoom) {
+    if (poles.isEmpty) return [];
+    
+    List<Marker> clusterMarkers = [];
+    List<PoleData> processedPoles = [];
+    
+    for (PoleData pole in poles) {
+      if (processedPoles.contains(pole)) continue;
+      
+      // Find nearby poles for clustering
+      List<PoleData> cluster = [pole];
+      processedPoles.add(pole);
+      
+      for (PoleData otherPole in poles) {
+        if (processedPoles.contains(otherPole)) continue;
+        
+        double distance = _calculateDistance(pole.position, otherPole.position);
+        double distanceInPixels = distance * 111320 / math.pow(2, zoom); // Rough conversion
+        
+        if (distanceInPixels < _clusterDistance && cluster.length < _maxPolesPerCluster) {
+          cluster.add(otherPole);
+          processedPoles.add(otherPole);
+        }
+      }
+      
+      // Create cluster marker
+      if (cluster.length > 1) {
+        clusterMarkers.add(_createClusterMarker(cluster));
+      } else {
+        clusterMarkers.add(_createSinglePoleMarker(cluster.first));
+      }
+    }
+    
+    return clusterMarkers;
+  }
+
+  // Create a cluster marker for multiple poles
+  Marker _createClusterMarker(List<PoleData> poles) {
+    final center = _calculateClusterCenter(poles);
+    
+    return Marker(
+      width: 40,
+      height: 40,
+      point: center,
+      child: GestureDetector(
+        onTap: () => _showClusterDialog(poles),
+        child: Container(
+          decoration: BoxDecoration(
+            color: Colors.blue.withOpacity(0.8),
+            shape: BoxShape.circle,
+            border: Border.all(color: Colors.white, width: 2),
+          ),
+          child: Center(
+            child: Text(
+              '${poles.length}',
+              style: const TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.bold,
+                fontSize: 12,
+              ),
+            ),
           ),
         ),
-      );
-    }).toList();
+      ),
+    );
+  }
 
-    _lastTappedPole = _tappedPoleInfo;
-    return _cachedPoleMarkers!;
+  // Create a single pole marker
+  Marker _createSinglePoleMarker(PoleData pole) {
+    return Marker(
+      width: 30,
+      height: 30,
+      point: pole.position,
+      child: GestureDetector(
+        onTap: () => _onPoleTap(pole),
+        child: Icon(
+          Icons.location_on,
+          color: _selectedPoleNotifier.value?.position == pole.position
+              ? Colors.cyanAccent
+              : Colors.redAccent,
+        ),
+      ),
+    );
+  }
+
+  // Calculate center point of a cluster
+  LatLng _calculateClusterCenter(List<PoleData> poles) {
+    double lat = poles.map((p) => p.position.latitude).reduce((a, b) => a + b) / poles.length;
+    double lng = poles.map((p) => p.position.longitude).reduce((a, b) => a + b) / poles.length;
+    return LatLng(lat, lng);
+  }
+
+  // Calculate distance between two points in degrees
+  double _calculateDistance(LatLng point1, LatLng point2) {
+    return math.sqrt(
+      math.pow(point1.latitude - point2.latitude, 2) + 
+      math.pow(point1.longitude - point2.longitude, 2)
+    );
+  }
+
+  // Handle map position changes with debouncing for performance
+  void _onMapPositionChanged(MapCamera position, bool hasGesture) {
+    _currentZoom = position.zoom;
+    _currentBounds = position.visibleBounds;
+    
+    // Debounce marker updates during gestures for smooth performance
+    if (hasGesture) {
+      _debounceTimer?.cancel();
+      _debounceTimer = Timer(const Duration(milliseconds: 300), () {
+        _triggerMarkerUpdate();
+      });
+    } else {
+      // Immediate update for programmatic moves
+      _triggerMarkerUpdate();
+    }
+  }
+
+  // Trigger marker update without setState - no map flash!
+  void _triggerMarkerUpdate() {
+    _cachedPoleMarkers = null;
+    _markerUpdateTrigger.value = _markerUpdateTrigger.value + 1;
+  }
+
+  // Show dialog when cluster is tapped
+  void _showClusterDialog(List<PoleData> poles) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Cluster (${poles.length} poles)'),
+        content: SizedBox(
+          width: 300,
+          height: 200,
+          child: ListView.builder(
+            itemCount: poles.length,
+            itemBuilder: (context, index) {
+              final pole = poles[index];
+              return ListTile(
+                title: Text('Pole ${pole.name}'),
+                subtitle: Text('${pole.position.latitude.toStringAsFixed(4)}, ${pole.position.longitude.toStringAsFixed(4)}'),
+                onTap: () {
+                  Navigator.of(context).pop();
+                  _onPoleTap(pole);
+                  _mapController.move(pole.position, 15);
+                },
+              );
+            },
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
   }
 
   // Performance optimization: Build cached user marker only when location changes
   Marker? _buildUserMarker() {
-    if (_userLocation == null) return null;
+    final userLocation = _userLocationNotifier.value;
+    if (userLocation == null) return null;
 
-    if (_cachedUserMarker != null && _lastUserLocation == _userLocation) {
+    if (_cachedUserMarker != null && _lastUserLocation == userLocation) {
       return _cachedUserMarker;
     }
 
     _cachedUserMarker = Marker(
       width: 40,
       height: 40,
-      point: _userLocation!,
+      point: userLocation,
       child: const Icon(Icons.person_pin_circle,
           color: Colors.lightBlueAccent, size: 40),
     );
 
-    _lastUserLocation = _userLocation;
+    _lastUserLocation = userLocation;
     return _cachedUserMarker;
   }
 
@@ -453,24 +728,28 @@ class _MapScreenState extends State<MapScreen> {
       options: MapOptions(
         initialCenter: initialCenter,
         initialZoom: 15.0,
-        maxZoom: 18.0, // Match TileLayer maxZoom to prevent blank areas
+        maxZoom: 17.0, // Match TileLayer maxZoom to prevent blank areas
         minZoom: 8.0, // Reasonable minimum zoom for this area
         // Performance optimizations for smoother movement
         interactionOptions: const InteractionOptions(
           flags: InteractiveFlag.all & ~InteractiveFlag.rotate,
         ),
-        // Reduce animation duration for snappier feel
-        onMapEvent: (MapEvent mapEvent) {
-          // Optional: Handle map events if needed
+        // Add position change callback for debounced marker updates
+        onPositionChanged: (MapCamera position, bool hasGesture) {
+          _onMapPositionChanged(position, hasGesture);
         },
       ),
       children: [
-        // UI: Use a light/greyish map tile with optional persistent caching
+        // UI: Use OpenStreetMap official tiles with proper attribution
         TileLayer(
-          urlTemplate:
-              "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png",
-          subdomains: const ['a', 'b', 'c'],
+          urlTemplate: "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
           retinaMode: true,
+          // Add proper user agent and attribution for OpenStreetMap compliance
+          additionalOptions: const {
+            'attribution': '© OpenStreetMap contributors',
+          },
+          userAgentPackageName:
+              'com.example.railapp/1.0 (contact: dev@railapp.example.com)',
           // Use cached tile provider if cache path is available, otherwise fallback to network
           tileProvider:
               NetworkTileProvider(), // Temporarily disabled cache until we fix the API
@@ -484,10 +763,10 @@ class _MapScreenState extends State<MapScreen> {
           //         ),
           //       )
           //     : NetworkTileProvider(),
-          maxZoom: 18, // Reduced from 19 to prevent blank tiles
-          minZoom: 1, // Set minimum zoom to prevent issues
-          keepBuffer: 3, // Increased buffer for smoother panning
-          panBuffer: 1, // Reduce pan buffer to decrease memory usage
+          maxZoom: 18, // Standard OSM max zoom
+          minZoom: 3, // Allow reasonable zoom out
+          keepBuffer: 3, // Normal buffer for smooth panning
+          panBuffer: 1, // Normal pan buffer
           // Better tile error handling
           errorTileCallback: (tile, error, stackTrace) {
             // Handle tile loading errors gracefully
@@ -498,14 +777,59 @@ class _MapScreenState extends State<MapScreen> {
             return tileWidget;
           },
         ),
-        PolylineLayer(polylines: _routePolylines),
-        if (_searchPolyline != null)
-          PolylineLayer(polylines: [_searchPolyline!]),
-        // Performance optimized MarkerLayer with cached markers
-        MarkerLayer(
-          markers: [
-            ..._buildPoleMarkers(),
-            if (_buildUserMarker() != null) _buildUserMarker()!,
+        // Only show polylines when zoomed in enough for performance
+        if (_currentZoom >= 11.0)
+          PolylineLayer(polylines: _routePolylines),
+        // Search polyline - optimized with ValueListenableBuilder
+        ValueListenableBuilder<Polyline?>(
+          valueListenable: _searchPolylineNotifier,
+          builder: (context, searchPolyline, child) {
+            return searchPolyline != null 
+                ? PolylineLayer(polylines: [searchPolyline])
+                : const SizedBox.shrink();
+          },
+        ),
+        // Connection line from user to selected pole - optimized with ValueListenableBuilder
+        ValueListenableBuilder<Polyline?>(
+          valueListenable: _connectionLineNotifier,
+          builder: (context, connectionLine, child) {
+            return connectionLine != null 
+                ? PolylineLayer(polylines: [connectionLine])
+                : const SizedBox.shrink();
+          },
+        ),
+        // Performance optimized MarkerLayer - listens to both selection and position changes
+        ValueListenableBuilder<int>(
+          valueListenable: _markerUpdateTrigger,
+          builder: (context, trigger, child) {
+            return ValueListenableBuilder<PoleData?>(
+              valueListenable: _selectedPoleNotifier,
+              builder: (context, selectedPole, child) {
+                return MarkerLayer(
+                  markers: _buildPoleMarkers(),
+                );
+              },
+            );
+          },
+        ),
+        // Separate MarkerLayer for user location to prevent rebuilding poles
+        ValueListenableBuilder<LatLng?>(
+          valueListenable: _userLocationNotifier,
+          builder: (context, userLocation, child) {
+            return MarkerLayer(
+              markers: [
+                if (userLocation != null) _buildUserMarker()!,
+              ],
+            );
+          },
+        ),
+        // Add proper attribution for OpenStreetMap compliance
+        RichAttributionWidget(
+          attributions: [
+            TextSourceAttribution(
+              '© OpenStreetMap contributors',
+              onTap: () => print('OpenStreetMap attribution tapped'),
+            ),
           ],
         ),
       ],
@@ -598,9 +922,14 @@ class _MapScreenState extends State<MapScreen> {
                       borderRadius: BorderRadius.circular(15)),
                   child: Padding(
                     padding: const EdgeInsets.all(16.0),
-                    child: _tappedPoleInfo != null
-                        ? _buildTappedPoleInfo(titleStyle, bodyStyle)
-                        : _buildNearestPoleInfo(titleStyle),
+                    child: ValueListenableBuilder<PoleData?>(
+                      valueListenable: _selectedPoleNotifier,
+                      builder: (context, selectedPole, child) {
+                        return selectedPole != null
+                            ? _buildTappedPoleInfo(titleStyle, bodyStyle)
+                            : _buildNearestPoleInfo(titleStyle);
+                      },
+                    ),
                   ),
                 ),
               ),
@@ -648,12 +977,14 @@ class _MapScreenState extends State<MapScreen> {
 
   // UI: Pass the text styles into the build methods
   Widget _buildTappedPoleInfo(TextStyle titleStyle, TextStyle bodyStyle) {
-    final distance = _userLocation != null
+    final selectedPole = _selectedPoleNotifier.value!;
+    final userLocation = _userLocationNotifier.value;
+    final distance = userLocation != null
         ? Geolocator.distanceBetween(
-            _userLocation!.latitude,
-            _userLocation!.longitude,
-            _tappedPoleInfo!.position.latitude,
-            _tappedPoleInfo!.position.longitude)
+            userLocation.latitude,
+            userLocation.longitude,
+            selectedPole.position.latitude,
+            selectedPole.position.longitude)
         : null;
     return Column(
       mainAxisSize: MainAxisSize.min,
@@ -662,18 +993,21 @@ class _MapScreenState extends State<MapScreen> {
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            Text('Pole: ${_tappedPoleInfo!.name}', style: titleStyle),
+            Text('Pole: ${selectedPole.name}', style: titleStyle),
             IconButton(
               padding: EdgeInsets.zero,
               constraints: const BoxConstraints(),
               icon: const Icon(Icons.close, color: Colors.white),
-              onPressed: () => setState(() => _tappedPoleInfo = null),
+              onPressed: () {
+                _selectedPoleNotifier.value = null;
+                _connectionLineNotifier.value = null;
+                _triggerMarkerUpdate(); // Refresh markers to remove selection without setState
+              },
             )
           ],
         ),
         const SizedBox(height: 8),
-        Text('Data ID: ${_tappedPoleInfo!.dataId}', style: bodyStyle),
-        Text('Cable Height: ${_tappedPoleInfo!.height.toStringAsFixed(1)} m',
+        Text('Cable Height: ${selectedPole.height.toStringAsFixed(1)} m',
             style: bodyStyle),
         Text(
             'Distance: ${distance != null ? '${distance.toStringAsFixed(1)} m away' : 'Calculating...'}',
