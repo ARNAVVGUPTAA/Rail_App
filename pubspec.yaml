@@ -1,5 +1,5 @@
 name: apprail
-description: A Railway Cable Route Visualization App
+description: NE Railways Cable Route Planning and Visualization App
 publish_to: 'none'
 version: 1.0.0+1
 
@@ -37,6 +37,8 @@ dependencies:
   # UI
   cupertino_icons: ^1.0.8
   fluttertoast: ^8.2.2
+
+  flutter_launcher_icons: ^0.14.4
 
 dev_dependencies:
   flutter_test:
