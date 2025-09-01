@@ -1,4 +1,4 @@
-package com.example.railapp
+package com.nerailways.cablerouteplan
 
 import io.flutter.embedding.android.FlutterActivity
 

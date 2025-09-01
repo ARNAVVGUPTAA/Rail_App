@@ -7,7 +7,6 @@ import 'package:geolocator/geolocator.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:path_provider/path_provider.dart';
 import 'map_data_service.dart';
-import 'package:fluttertoast/fluttertoast.dart';
 
 class MapScreen extends StatefulWidget {
   const MapScreen({super.key});
@@ -30,9 +29,8 @@ class _MapScreenState extends State<MapScreen> {
 
   // Performance optimization variables
   double _currentZoom = 10.0;
-  LatLngBounds? _currentBounds;
   Timer? _debounceTimer;
-  
+
   // Clustering settings
   static const double _clusterDistance = 50.0; // pixels
   static const int _maxPolesPerCluster = 10;
@@ -45,11 +43,19 @@ class _MapScreenState extends State<MapScreen> {
       ValueNotifier<LatLng?>(null);
   final ValueNotifier<int> _markerUpdateTrigger =
       ValueNotifier<int>(0); // Triggers marker rebuilds without setState
-  
+
   PoleData? get _tappedPoleInfo => _selectedPoleNotifier.value;
-  PoleData? _nearestPole;
-  double? _distanceToNearestPole;
-  
+
+  // Use ValueNotifiers for nearest pole to avoid setState rebuilds
+  final ValueNotifier<PoleData?> _nearestPoleNotifier =
+      ValueNotifier<PoleData?>(null);
+  final ValueNotifier<double?> _distanceToNearestPoleNotifier =
+      ValueNotifier<double?>(null);
+
+  // Getter for backward compatibility
+  PoleData? get _nearestPole => _nearestPoleNotifier.value;
+  double? get _distanceToNearestPole => _distanceToNearestPoleNotifier.value;
+
   // Connection line from user to selected pole
   final ValueNotifier<Polyline?> _connectionLineNotifier =
       ValueNotifier<Polyline?>(null);
@@ -57,6 +63,7 @@ class _MapScreenState extends State<MapScreen> {
       ValueNotifier<Polyline?>(null);
 
   StreamSubscription<Position>? _positionStream;
+  int _locationRetryCount = 0; // Track location retry attempts
 
   // Performance optimization: Cache markers to avoid rebuilding every frame
   List<Marker>? _cachedPoleMarkers;
@@ -82,6 +89,8 @@ class _MapScreenState extends State<MapScreen> {
     _markerUpdateTrigger.dispose();
     _connectionLineNotifier.dispose();
     _searchPolylineNotifier.dispose();
+    _nearestPoleNotifier.dispose();
+    _distanceToNearestPoleNotifier.dispose();
     super.dispose();
   }
 
@@ -89,6 +98,137 @@ class _MapScreenState extends State<MapScreen> {
     await _requestPermissions();
     await _loadSupabaseData();
     await _initializeLocationListener();
+  }
+
+  // Enhanced method to show data loading progress with real-time counts
+  void _showDataProgress(
+      String message, int percentage, int routesLoaded, int polesLoaded) {
+    // Clear previous notifications
+    ScaffoldMessenger.of(context).clearSnackBars();
+
+    String detailText = message;
+    String progressInfo = '';
+
+    if (routesLoaded > 0 && polesLoaded > 0) {
+      detailText = '🗺️ Data Loading Progress';
+      progressInfo = 'Routes: $routesLoaded ✓ | Poles: $polesLoaded ✓';
+    } else if (routesLoaded > 0) {
+      detailText = '🗺️ Loading Routes Complete';
+      progressInfo = 'Routes loaded: $routesLoaded ✓ | Loading poles...';
+    } else {
+      detailText = message;
+    }
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Container(
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          child: Row(
+            children: [
+              Stack(
+                alignment: Alignment.center,
+                children: [
+                  SizedBox(
+                    width: 30,
+                    height: 30,
+                    child: CircularProgressIndicator(
+                      value: percentage / 100,
+                      color: Colors.white,
+                      strokeWidth: 3,
+                      backgroundColor: Colors.white24,
+                    ),
+                  ),
+                  Text(
+                    '$percentage%',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 10,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      detailText,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 14,
+                      ),
+                    ),
+                    if (progressInfo.isNotEmpty) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        progressInfo,
+                        style: const TextStyle(
+                          fontSize: 12,
+                          color: Colors.white70,
+                        ),
+                      ),
+                    ],
+                    const SizedBox(height: 2),
+                    Text(
+                      'Overall progress: $percentage%',
+                      style: const TextStyle(
+                        fontSize: 11,
+                        color: Colors.white60,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+        backgroundColor: Colors.indigo.shade700,
+        duration: const Duration(seconds: 8), // Longer duration for visibility
+      ),
+    );
+  }
+
+  void _showLocationProgress(String message, int percentage) {
+    ScaffoldMessenger.of(context).clearSnackBars();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Row(
+          children: [
+            SizedBox(
+              width: 20,
+              height: 20,
+              child: Stack(
+                children: [
+                  CircularProgressIndicator(
+                    strokeWidth: 2,
+                    valueColor:
+                        const AlwaysStoppedAnimation<Color>(Colors.white),
+                    value: percentage / 100.0,
+                  ),
+                  Center(
+                    child: Text(
+                      '$percentage%',
+                      style: const TextStyle(
+                        fontSize: 8,
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 16),
+            Expanded(child: Text(message)),
+          ],
+        ),
+        backgroundColor: Colors.orange,
+        duration: const Duration(seconds: 30), // Long duration for loading
+      ),
+    );
   }
 
   // Request all necessary permissions
@@ -221,33 +361,19 @@ class _MapScreenState extends State<MapScreen> {
         _isLoading = true;
       });
 
-      // Show loading notification
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Row(
-            children: [
-              SizedBox(
-                width: 20,
-                height: 20,
-                child: CircularProgressIndicator(
-                  color: Colors.white,
-                  strokeWidth: 2,
-                ),
-              ),
-              SizedBox(width: 12),
-              Text('🔄 Loading data from Supabase...'),
-            ],
-          ),
-          backgroundColor: Colors.green,
-          duration: Duration(seconds: 2),
-        ),
-      );
+      // Show initial loading
+      _showDataProgress("🔗 Connecting to database...", 10, 0, 0);
+      await Future.delayed(
+          const Duration(milliseconds: 800)); // Let user see the progress
 
       print('🚀 Fetching data from Supabase...');
 
-      // Fetch routes and poles from Supabase
+      // Start loading routes
+      _showDataProgress("📡 Downloading routes data...", 25, 0, 0);
       final routes = await MapDataService.fetchRoutes();
-      final poles = await MapDataService.fetchPoles();
+
+      _showDataProgress("🗺️ Processing routes data...", 40, routes.length, 0);
+      await Future.delayed(const Duration(milliseconds: 600)); // Show progress
 
       // Convert routes to polylines
       List<Polyline> tempPolylines = routes.map((route) {
@@ -258,9 +384,24 @@ class _MapScreenState extends State<MapScreen> {
         );
       }).toList();
 
+      // Start loading poles
+      _showDataProgress("📡 Downloading poles data...", 60, routes.length, 0);
+      final poles = await MapDataService.fetchPoles();
+
+      _showDataProgress(
+          "⚡ Processing all map data...", 80, routes.length, poles.length);
+      await Future.delayed(
+          const Duration(milliseconds: 800)); // Show final progress
+
       _poles = poles;
       _routePolylines = tempPolylines;
       _cachedPoleMarkers = null; // Reset cache
+
+      _showDataProgress(
+          "✅ Finalizing map setup...", 95, routes.length, poles.length);
+
+      // Short delay to show final progress
+      await Future.delayed(const Duration(milliseconds: 1000));
 
       setState(() {
         _isLoading = false;
@@ -268,20 +409,23 @@ class _MapScreenState extends State<MapScreen> {
 
       print('✅ Loaded ${routes.length} routes and ${poles.length} poles');
 
-      // Show success notification
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Row(
-            children: [
-              const Icon(Icons.check_circle, color: Colors.white),
-              const SizedBox(width: 12),
-              Text('✅ Loaded ${routes.length} routes, ${poles.length} poles'),
-            ],
+      // Clear progress and show success
+      if (mounted) {
+        ScaffoldMessenger.of(context).clearSnackBars();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Row(
+              children: [
+                const Icon(Icons.check_circle, color: Colors.white),
+                const SizedBox(width: 12),
+                Text('✅ Loaded ${routes.length} routes, ${poles.length} poles'),
+              ],
+            ),
+            backgroundColor: Colors.green,
+            duration: const Duration(seconds: 3),
           ),
-          backgroundColor: Colors.green,
-          duration: const Duration(seconds: 2),
-        ),
-      );
+        );
+      }
     } catch (e) {
       setState(() {
         _isLoading = false;
@@ -289,28 +433,90 @@ class _MapScreenState extends State<MapScreen> {
 
       print('❌ Error loading data: $e');
 
-      Fluttertoast.showToast(
-        msg: "Error loading data: ${e.toString()}",
-        toastLength: Toast.LENGTH_LONG,
-        gravity: ToastGravity.BOTTOM,
-        backgroundColor: Colors.redAccent,
-        textColor: Colors.white,
-      );
+      // Clear progress and show error
+      if (mounted) {
+        ScaffoldMessenger.of(context).clearSnackBars();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Row(
+              children: [
+                const Icon(Icons.error, color: Colors.white),
+                const SizedBox(width: 12),
+                Expanded(child: Text('❌ Error loading data: ${e.toString()}')),
+              ],
+            ),
+            backgroundColor: Colors.red,
+            duration: const Duration(seconds: 4),
+            action: SnackBarAction(
+              label: 'Retry',
+              textColor: Colors.white,
+              onPressed: () => _loadSupabaseData(),
+            ),
+          ),
+        );
+      }
     }
   }
 
   Future<void> _initializeLocationListener() async {
     try {
+      // Show initial loading with progress
+      if (mounted) {
+        _showLocationProgress("Checking location services...", 10);
+      }
+
+      // Check if location services are enabled
+      bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (!serviceEnabled) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).clearSnackBars();
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Row(
+                children: [
+                  Icon(Icons.location_off, color: Colors.red),
+                  SizedBox(width: 8),
+                  Expanded(
+                      child: Text(
+                          'Location services are disabled. Please enable them in settings.')),
+                ],
+              ),
+              duration: Duration(seconds: 4),
+            ),
+          );
+        }
+        return;
+      }
+
+      if (mounted) {
+        _showLocationProgress("Checking permissions...", 25);
+      }
+
       // Double-check permissions before trying to get location
       LocationPermission permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        if (mounted) {
+          _showLocationProgress("Requesting location permission...", 40);
+        }
+        permission = await Geolocator.requestPermission();
+      }
+
       if (permission == LocationPermission.denied ||
           permission == LocationPermission.deniedForever) {
         // Permissions not available, skip location features
         if (mounted) {
+          ScaffoldMessenger.of(context).clearSnackBars();
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
-              content: Text(
-                  'Location permission denied. You can still view the map and poles.'),
+              content: Row(
+                children: [
+                  Icon(Icons.location_disabled, color: Colors.orange),
+                  SizedBox(width: 8),
+                  Expanded(
+                      child: Text(
+                          'Location permission denied. You can still view the map and poles.')),
+                ],
+              ),
               duration: Duration(seconds: 3),
             ),
           );
@@ -318,34 +524,133 @@ class _MapScreenState extends State<MapScreen> {
         return;
       }
 
-      Position initialPosition = await Geolocator.getCurrentPosition(
-        locationSettings: const LocationSettings(
-          accuracy: LocationAccuracy.best,
-          timeLimit: Duration(seconds: 10), // Add timeout
-        ),
-      );
-
       if (mounted) {
-        // Use ValueNotifier to update location without rebuilding entire map
-        _userLocation = LatLng(initialPosition.latitude, initialPosition.longitude);
-        _userLocationNotifier.value = _userLocation;
-        _findNearestPole();
-        // Update connection line when location changes
-        _updateConnectionLine();
+        _showLocationProgress("Getting GPS signal...", 60);
       }
 
+      // Get initial position with more robust timeout handling
+      Position initialPosition;
+      try {
+        initialPosition = await Geolocator.getCurrentPosition(
+          locationSettings: const LocationSettings(
+            accuracy: LocationAccuracy
+                .medium, // Use medium accuracy for faster response
+            timeLimit: Duration(seconds: 15), // Reduced timeout
+          ),
+        ).timeout(
+          const Duration(seconds: 20), // Reduced overall timeout
+          onTimeout: () {
+            throw TimeoutException(
+                'GPS signal weak. Trying alternative method...',
+                const Duration(seconds: 20));
+          },
+        );
+      } catch (e) {
+        if (mounted) {
+          _showLocationProgress("Trying alternative location method...", 70);
+        }
+
+        // Fallback to last known position
+        try {
+          initialPosition = await Geolocator.getLastKnownPosition() ??
+              await Geolocator.getCurrentPosition(
+                locationSettings: const LocationSettings(
+                  accuracy: LocationAccuracy
+                      .low, // Lower accuracy for faster response
+                  timeLimit: Duration(seconds: 10),
+                ),
+              ).timeout(const Duration(seconds: 15));
+        } catch (fallbackError) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).clearSnackBars();
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: const Row(
+                  children: [
+                    Icon(Icons.location_off, color: Colors.orange),
+                    SizedBox(width: 8),
+                    Expanded(
+                        child: Text(
+                            'Unable to get precise location. Using approximate location for map.')),
+                  ],
+                ),
+                backgroundColor: Colors.orange.shade700,
+                duration: const Duration(seconds: 4),
+                action: SnackBarAction(
+                  label: 'Retry',
+                  textColor: Colors.white,
+                  onPressed: () => _initializeLocationListener(),
+                ),
+              ),
+            );
+          }
+          // Use a default location if all else fails
+          initialPosition = Position(
+            latitude: 26.8467,
+            longitude: 80.9462,
+            timestamp: DateTime.now(),
+            accuracy: 1000,
+            altitude: 0,
+            altitudeAccuracy: 0,
+            heading: 0,
+            headingAccuracy: 0,
+            speed: 0,
+            speedAccuracy: 0,
+          );
+        }
+      }
+
+      if (mounted) {
+        _showLocationProgress("Initializing location tracking...", 90);
+
+        // Short delay to show final progress
+        await Future.delayed(const Duration(milliseconds: 500));
+
+        // Clear loading and show success
+        if (mounted) {
+          ScaffoldMessenger.of(context).clearSnackBars();
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Row(
+                children: [
+                  Icon(Icons.location_on, color: Colors.green),
+                  SizedBox(width: 8),
+                  Text('Location initialized successfully'),
+                ],
+              ),
+              duration: Duration(seconds: 2),
+            ),
+          );
+
+          // Use ValueNotifier to update location without rebuilding entire map
+          _userLocation =
+              LatLng(initialPosition.latitude, initialPosition.longitude);
+          _userLocationNotifier.value = _userLocation;
+          _findNearestPole();
+          // Update connection line when location changes
+          _updateConnectionLine();
+        }
+      }
+
+      // Cancel any existing location stream to prevent duplicates
+      _positionStream?.cancel();
+
+      // Start location stream with better error handling and no timeout
       _positionStream = Geolocator.getPositionStream(
         locationSettings: const LocationSettings(
-          accuracy: LocationAccuracy.best,
-          distanceFilter: 10,
-          timeLimit: Duration(seconds: 10), // Add timeout for each update
+          accuracy: LocationAccuracy.high, // High accuracy for precise tracking
+          distanceFilter: 5, // Update every 5 meters
+          // Remove timeLimit to prevent constant timeouts
         ),
       ).listen(
         (Position position) {
           if (mounted) {
-            // Use ValueNotifier to update location without rebuilding entire map
+            // CRITICAL: Only update ValueNotifier - DO NOT call setState!
+            // This prevents map rebuilds and only updates the location marker
             _userLocation = LatLng(position.latitude, position.longitude);
             _userLocationNotifier.value = _userLocation;
+
+            // These operations don't trigger rebuilds
             _findNearestPole();
             if (_tappedPoleInfo != null) {
               _onPoleTap(_tappedPoleInfo!);
@@ -357,22 +662,85 @@ class _MapScreenState extends State<MapScreen> {
         onError: (error) {
           // Handle location stream errors gracefully
           if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text('Location update error: $error'),
-                duration: const Duration(seconds: 2),
-              ),
-            );
+            print('Location stream error: $error');
+            String errorMessage = 'Location update failed';
+
+            // Parse common error codes
+            String errorStr = error.toString().toLowerCase();
+            if (errorStr.contains('permission')) {
+              errorMessage = 'Location permission was revoked';
+            } else if (errorStr.contains('service')) {
+              errorMessage = 'Location service unavailable';
+            } else if (errorStr.contains('timeout')) {
+              // For timeout, just continue using last known location
+              print('Location timeout - continuing with last known position');
+              return; // Don't show error messages for timeout, just continue
+            } else if (errorStr.contains('network')) {
+              errorMessage = 'Network error getting location';
+            }
+
+            // Only show non-timeout errors and limit frequency
+            if (_locationRetryCount == 0) {
+              ScaffoldMessenger.of(context).clearSnackBars();
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Row(
+                    children: [
+                      const Icon(Icons.warning, color: Colors.orange),
+                      const SizedBox(width: 8),
+                      Expanded(child: Text(errorMessage)),
+                    ],
+                  ),
+                  duration: const Duration(seconds: 2),
+                ),
+              );
+            }
+
+            // Only retry for serious errors, not timeouts
+            if (!errorStr.contains('timeout') && _locationRetryCount < 2) {
+              _locationRetryCount++;
+              Future.delayed(const Duration(seconds: 15), () {
+                if (mounted) {
+                  print('Retrying location initialization...');
+                  _initializeLocationListener();
+                }
+              });
+            }
           }
         },
       );
+
+      // Reset retry count on successful initialization
+      _locationRetryCount = 0;
     } catch (e) {
       // Handle location errors gracefully
       if (mounted) {
+        ScaffoldMessenger.of(context).clearSnackBars();
+
+        String errorMessage = 'Unable to get location';
+        if (e is TimeoutException) {
+          errorMessage =
+              'Location request timed out. Check GPS signal and try again.';
+        } else if (e.toString().contains('permission')) {
+          errorMessage = 'Location permission denied';
+        } else if (e.toString().contains('service')) {
+          errorMessage = 'Location services disabled';
+        }
+
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Unable to get location: ${e.toString()}'),
+            content: Row(
+              children: [
+                const Icon(Icons.error, color: Colors.red),
+                const SizedBox(width: 8),
+                Expanded(child: Text(errorMessage)),
+              ],
+            ),
             duration: const Duration(seconds: 3),
+            action: SnackBarAction(
+              label: 'Retry',
+              onPressed: () => _initializeLocationListener(),
+            ),
           ),
         );
       }
@@ -395,12 +763,9 @@ class _MapScreenState extends State<MapScreen> {
         nearest = pole;
       }
     }
-    if (mounted) {
-      setState(() {
-        _nearestPole = nearest;
-        _distanceToNearestPole = minDistance;
-      });
-    }
+    // Use ValueNotifiers instead of setState to avoid map rebuilds
+    _nearestPoleNotifier.value = nearest;
+    _distanceToNearestPoleNotifier.value = minDistance;
   }
 
   void _searchPole(String name) {
@@ -439,10 +804,10 @@ class _MapScreenState extends State<MapScreen> {
 
   void _onPoleTap(PoleData poleData) {
     if (_userLocationNotifier.value == null) return;
-    
+
     // Only proceed if this is a different pole
     if (_selectedPoleNotifier.value?.id == poleData.id) return;
-    
+
     // Update the selected pole notifier - no setState needed!
     _selectedPoleNotifier.value = poleData;
     // Create connection line from user to selected pole
@@ -451,10 +816,107 @@ class _MapScreenState extends State<MapScreen> {
     _triggerMarkerUpdate();
   }
 
-  void _centerOnUser() {
-    final userLocation = _userLocationNotifier.value;
-    if (userLocation != null) {
-      _mapController.move(userLocation, 15.0);
+  void _centerOnUser() async {
+    // Show loading indicator with progress
+    _showLocationProgress("Getting current location...", 20);
+
+    // Get fresh location when button is pressed
+    try {
+      // Update progress
+      _showLocationProgress("Acquiring GPS signal...", 50);
+
+      Position currentPosition = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.high, // Back to high accuracy
+          timeLimit: Duration(seconds: 20), // Reasonable timeout
+        ),
+      ).timeout(
+        const Duration(seconds: 25),
+        onTimeout: () {
+          throw TimeoutException('Location request timed out after 25 seconds',
+              const Duration(seconds: 25));
+        },
+      );
+
+      // Update progress
+      _showLocationProgress("Processing location...", 85);
+
+      // Update user location immediately
+      _userLocation =
+          LatLng(currentPosition.latitude, currentPosition.longitude);
+      _userLocationNotifier.value = _userLocation;
+      _findNearestPole();
+      _updateConnectionLine();
+
+      // Center map on user location
+      _mapController.move(_userLocation!, 15.0);
+
+      // Short delay to show completion
+      await Future.delayed(const Duration(milliseconds: 300));
+
+      // Hide loading and show success
+      if (mounted) {
+        ScaffoldMessenger.of(context).clearSnackBars();
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Row(
+              children: [
+                Icon(Icons.check_circle, color: Colors.green),
+                SizedBox(width: 8),
+                Text('Location updated successfully'),
+              ],
+            ),
+            duration: Duration(seconds: 2),
+          ),
+        );
+      }
+    } catch (e) {
+      // Hide loading and show error
+      if (mounted) {
+        ScaffoldMessenger.of(context).clearSnackBars();
+
+        // Fall back to last known location if fresh location fails
+        final userLocation = _userLocationNotifier.value;
+        if (userLocation != null) {
+          _mapController.move(userLocation, 15.0);
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Row(
+                children: [
+                  Icon(Icons.warning, color: Colors.orange),
+                  SizedBox(width: 8),
+                  Text('Location timed out. Using last known location.'),
+                ],
+              ),
+              duration: Duration(seconds: 3),
+            ),
+          );
+        } else {
+          String errorMessage = 'Unable to get location';
+          if (e is TimeoutException) {
+            errorMessage =
+                'Location request timed out. Check GPS signal and try again.';
+          }
+
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Row(
+                children: [
+                  const Icon(Icons.error, color: Colors.red),
+                  const SizedBox(width: 8),
+                  Expanded(child: Text(errorMessage)),
+                ],
+              ),
+              backgroundColor: Colors.red,
+              duration: const Duration(seconds: 4),
+              action: SnackBarAction(
+                label: 'Retry',
+                onPressed: () => _centerOnUser(),
+              ),
+            ),
+          );
+        }
+      }
     }
   }
 
@@ -485,29 +947,29 @@ class _MapScreenState extends State<MapScreen> {
     // Get current map state
     final zoom = _mapController.camera.zoom;
     final bounds = _mapController.camera.visibleBounds;
-    
+
     // Check if we need to rebuild markers
     bool needsRebuild = _cachedPoleMarkers == null ||
         _lastTappedPole != _selectedPoleNotifier.value ||
         _lastZoom != zoom ||
         _lastBounds != bounds;
-    
+
     if (!needsRebuild) {
       return _cachedPoleMarkers!;
     }
 
     // Filter poles by viewport for performance
     _visiblePoles = _filterPolesByViewport(bounds);
-    
+
     // Use clustering at lower zoom levels
     if (zoom < _minZoomForIndividualPoles) {
       _cachedPoleMarkers = _buildClusteredMarkers(_visiblePoles, zoom);
     } else {
       // Show individual poles at higher zoom levels, but limit quantity
-      final limitedPoles = _visiblePoles.length > 500 
-          ? _visiblePoles.take(500).toList() 
+      final limitedPoles = _visiblePoles.length > 500
+          ? _visiblePoles.take(500).toList()
           : _visiblePoles;
-          
+
       _cachedPoleMarkers = limitedPoles.map((pole) {
         return Marker(
           width: 30,
@@ -530,7 +992,7 @@ class _MapScreenState extends State<MapScreen> {
     _lastTappedPole = _selectedPoleNotifier.value;
     _lastZoom = zoom;
     _lastBounds = bounds;
-    
+
     return _cachedPoleMarkers!;
   }
 
@@ -544,29 +1006,31 @@ class _MapScreenState extends State<MapScreen> {
   // Build clustered markers for better performance at low zoom levels
   List<Marker> _buildClusteredMarkers(List<PoleData> poles, double zoom) {
     if (poles.isEmpty) return [];
-    
+
     List<Marker> clusterMarkers = [];
     List<PoleData> processedPoles = [];
-    
+
     for (PoleData pole in poles) {
       if (processedPoles.contains(pole)) continue;
-      
+
       // Find nearby poles for clustering
       List<PoleData> cluster = [pole];
       processedPoles.add(pole);
-      
+
       for (PoleData otherPole in poles) {
         if (processedPoles.contains(otherPole)) continue;
-        
+
         double distance = _calculateDistance(pole.position, otherPole.position);
-        double distanceInPixels = distance * 111320 / math.pow(2, zoom); // Rough conversion
-        
-        if (distanceInPixels < _clusterDistance && cluster.length < _maxPolesPerCluster) {
+        double distanceInPixels =
+            distance * 111320 / math.pow(2, zoom); // Rough conversion
+
+        if (distanceInPixels < _clusterDistance &&
+            cluster.length < _maxPolesPerCluster) {
           cluster.add(otherPole);
           processedPoles.add(otherPole);
         }
       }
-      
+
       // Create cluster marker
       if (cluster.length > 1) {
         clusterMarkers.add(_createClusterMarker(cluster));
@@ -574,14 +1038,14 @@ class _MapScreenState extends State<MapScreen> {
         clusterMarkers.add(_createSinglePoleMarker(cluster.first));
       }
     }
-    
+
     return clusterMarkers;
   }
 
   // Create a cluster marker for multiple poles
   Marker _createClusterMarker(List<PoleData> poles) {
     final center = _calculateClusterCenter(poles);
-    
+
     return Marker(
       width: 40,
       height: 40,
@@ -590,7 +1054,7 @@ class _MapScreenState extends State<MapScreen> {
         onTap: () => _showClusterDialog(poles),
         child: Container(
           decoration: BoxDecoration(
-            color: Colors.blue.withOpacity(0.8),
+            color: Colors.blue.withValues(alpha: 0.8),
             shape: BoxShape.circle,
             border: Border.all(color: Colors.white, width: 2),
           ),
@@ -629,24 +1093,24 @@ class _MapScreenState extends State<MapScreen> {
 
   // Calculate center point of a cluster
   LatLng _calculateClusterCenter(List<PoleData> poles) {
-    double lat = poles.map((p) => p.position.latitude).reduce((a, b) => a + b) / poles.length;
-    double lng = poles.map((p) => p.position.longitude).reduce((a, b) => a + b) / poles.length;
+    double lat = poles.map((p) => p.position.latitude).reduce((a, b) => a + b) /
+        poles.length;
+    double lng =
+        poles.map((p) => p.position.longitude).reduce((a, b) => a + b) /
+            poles.length;
     return LatLng(lat, lng);
   }
 
   // Calculate distance between two points in degrees
   double _calculateDistance(LatLng point1, LatLng point2) {
-    return math.sqrt(
-      math.pow(point1.latitude - point2.latitude, 2) + 
-      math.pow(point1.longitude - point2.longitude, 2)
-    );
+    return math.sqrt(math.pow(point1.latitude - point2.latitude, 2) +
+        math.pow(point1.longitude - point2.longitude, 2));
   }
 
   // Handle map position changes with debouncing for performance
   void _onMapPositionChanged(MapCamera position, bool hasGesture) {
     _currentZoom = position.zoom;
-    _currentBounds = position.visibleBounds;
-    
+
     // Debounce marker updates during gestures for smooth performance
     if (hasGesture) {
       _debounceTimer?.cancel();
@@ -680,7 +1144,8 @@ class _MapScreenState extends State<MapScreen> {
               final pole = poles[index];
               return ListTile(
                 title: Text('Pole ${pole.name}'),
-                subtitle: Text('${pole.position.latitude.toStringAsFixed(4)}, ${pole.position.longitude.toStringAsFixed(4)}'),
+                subtitle: Text(
+                    '${pole.position.latitude.toStringAsFixed(4)}, ${pole.position.longitude.toStringAsFixed(4)}'),
                 onTap: () {
                   Navigator.of(context).pop();
                   _onPoleTap(pole);
@@ -778,13 +1243,12 @@ class _MapScreenState extends State<MapScreen> {
           },
         ),
         // Only show polylines when zoomed in enough for performance
-        if (_currentZoom >= 11.0)
-          PolylineLayer(polylines: _routePolylines),
+        if (_currentZoom >= 11.0) PolylineLayer(polylines: _routePolylines),
         // Search polyline - optimized with ValueListenableBuilder
         ValueListenableBuilder<Polyline?>(
           valueListenable: _searchPolylineNotifier,
           builder: (context, searchPolyline, child) {
-            return searchPolyline != null 
+            return searchPolyline != null
                 ? PolylineLayer(polylines: [searchPolyline])
                 : const SizedBox.shrink();
           },
@@ -793,7 +1257,7 @@ class _MapScreenState extends State<MapScreen> {
         ValueListenableBuilder<Polyline?>(
           valueListenable: _connectionLineNotifier,
           builder: (context, connectionLine, child) {
-            return connectionLine != null 
+            return connectionLine != null
                 ? PolylineLayer(polylines: [connectionLine])
                 : const SizedBox.shrink();
           },
@@ -917,7 +1381,7 @@ class _MapScreenState extends State<MapScreen> {
                   // UI: Style the info panel card
                   elevation: 8,
                   color: const Color(0xFF2C3E50)
-                      .withOpacity(0.9), // Dark, slightly transparent
+                      .withValues(alpha: 0.9), // Dark, slightly transparent
                   shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(15)),
                   child: Padding(
@@ -968,6 +1432,24 @@ class _MapScreenState extends State<MapScreen> {
                   child: const Icon(Icons.my_location),
                 ),
               ),
+              // Loading overlay
+              if (_isLoading)
+                Container(
+                  color: Colors.black.withValues(alpha: 0.5),
+                  child: const Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        CircularProgressIndicator(color: Colors.white),
+                        SizedBox(height: 16),
+                        Text(
+                          'Loading data...',
+                          style: TextStyle(color: Colors.white, fontSize: 16),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
             ],
           );
         },

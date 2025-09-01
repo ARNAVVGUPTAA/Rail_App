@@ -18,11 +18,18 @@ class _AuthWrapperState extends State<AuthWrapper> {
     _initializeAuth();
   }
 
-  void _initializeAuth() {
+  void _initializeAuth() async {
+    // Always start fresh - clear any existing session for testing
+    print('Initializing auth - clearing any existing session');
+    await supabase.auth.signOut();
+
     // Listen to auth state changes
     supabase.auth.onAuthStateChange.listen((data) {
       final AuthChangeEvent event = data.event;
       final Session? session = data.session;
+
+      print(
+          'Auth state changed: ${event.name}, Session: ${session?.user.email ?? 'No session'}');
 
       if (mounted) {
         if (event == AuthChangeEvent.signedIn && session != null) {
@@ -46,27 +53,7 @@ class _AuthWrapperState extends State<AuthWrapper> {
 
   @override
   Widget build(BuildContext context) {
-    return StreamBuilder<AuthState>(
-      stream: supabase.auth.onAuthStateChange,
-      builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Scaffold(
-            body: Center(
-              child: CircularProgressIndicator(),
-            ),
-          );
-        }
-
-        final session = snapshot.hasData ? snapshot.data!.session : null;
-
-        if (session != null) {
-          // User is authenticated
-          return const RoleSelectionPage();
-        } else {
-          // User is not authenticated
-          return const LoginPage();
-        }
-      },
-    );
+    // Always start with login page to ensure proper auth flow
+    return const LoginPage();
   }
 }

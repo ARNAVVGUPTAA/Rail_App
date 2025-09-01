@@ -16,26 +16,22 @@ if (keystorePropertiesFile.exists()) {
 }
 
 android {
-    namespace = "com.example.railapp"
+    namespace = "com.nerailways.cablerouteplan"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = "27.0.12077973"
 
     compileOptions {
-        // Use Java 21 for now, will auto-update when VERSION_24 becomes available
-        sourceCompatibility = JavaVersion.VERSION_21
-        targetCompatibility = JavaVersion.VERSION_21
-        // For Java 24 when available: JavaVersion.VERSION_24
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
     }
 
     kotlinOptions {
-        // Use Java 21 target for now, will auto-update when VERSION_24 becomes available  
-        jvmTarget = JavaVersion.VERSION_21.toString()
-        // For Java 24 when available: JavaVersion.VERSION_24.toString()
+        jvmTarget = JavaVersion.VERSION_17.toString()
     }
 
     defaultConfig {
         // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
-        applicationId = "com.example.railapp"
+    applicationId = "com.nerailways.cablerouteplan"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = flutter.minSdkVersion
