@@ -220,7 +220,7 @@ class HomePage extends StatelessWidget {
           Divider(
             height: 40,
           ),
-          Container(
+          SizedBox(
             height: 200,
             child: CarouselSlider(
               options: CarouselOptions(
