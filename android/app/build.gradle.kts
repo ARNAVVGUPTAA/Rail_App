@@ -30,22 +30,24 @@ android {
     }
 
     defaultConfig {
-        // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
-    applicationId = "com.nerailways.cablerouteplan"
-        // You can update the following values to match your application needs.
-        // For more information, see: https://flutter.dev/to/review-gradle-config.
+        applicationId = "com.nerailways.cablerouteplan"
         minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
     }
 
+    // FIX: Replaced the crashing block with this null-safe version
     signingConfigs {
         create("release") {
-            keyAlias = keystoreProperties["keyAlias"] as String
-            keyPassword = keystoreProperties["keyPassword"] as String
-            storeFile = file(keystoreProperties["storeFile"] as String)
-            storePassword = keystoreProperties["storePassword"] as String
+            keyAlias = keystoreProperties.getProperty("keyAlias", "")
+            keyPassword = keystoreProperties.getProperty("keyPassword", "")
+            storeFile = if (keystoreProperties.containsKey("storeFile")) {
+                file(keystoreProperties.getProperty("storeFile"))
+            } else {
+                null
+            }
+            storePassword = keystoreProperties.getProperty("storePassword", "")
         }
     }
     
@@ -59,17 +61,17 @@ android {
     }
 
     lint {
-    checkReleaseBuilds = false
-    abortOnError = false
-    // Don't fail the app build for dependency lint
-    checkDependencies = false
-    // Disable specific noisy checks seen in dependencies
-    disable += setOf("InvalidPackage", "MissingPermission")
+        checkReleaseBuilds = false
+        abortOnError = false
+        checkDependencies = false
+        disable += setOf("InvalidPackage", "MissingPermission")
     }
 }
+
 dependencies {
     implementation("com.google.android.material:material:1.4.0")
 }
+
 flutter {
     source = "../.."
 }
